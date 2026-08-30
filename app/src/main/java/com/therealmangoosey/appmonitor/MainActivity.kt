@@ -56,10 +56,10 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestNotificationPermission()
         buildUi()
-        showLocalMode()
         registerReceiverCompat()
+        requestNotificationPermission()
+        showLocalMode()
     }
 
     override fun onDestroy() {
@@ -102,21 +102,18 @@ class MainActivity : Activity() {
 
         ipInput = EditText(this).apply {
             hint = "Parent IP address"
-            singleLine = true
-            inputType = android.text.InputType.TYPE_CLASS_PHONE
+            maxLines = 1
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
         }
         codeInput = EditText(this).apply {
             hint = "6-digit pairing code"
-            singleLine = true
+            maxLines = 1
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
         }
         content.addView(ipInput)
         content.addView(codeInput)
 
-        val actionButton = makeButton("Start") { startSelectedMode() }
-        actionButton.id = View.generateViewId()
-        content.addView(actionButton)
-
+        content.addView(makeButton("Start") { startSelectedMode() })
         content.addView(makeButton("Stop") { stopMonitoring() })
 
         statusLabel = TextView(this).apply {
@@ -179,7 +176,7 @@ class MainActivity : Activity() {
                 statusLabel.text = "Enter the parent IP and 6-digit code"
                 return
             }
-            startService(
+            startMonitorService(
                 Intent(this, MonitorService::class.java).apply {
                     action = MonitorService.ACTION_START_CHILD
                     putExtra(MonitorService.EXTRA_HOST, host)
@@ -187,7 +184,7 @@ class MainActivity : Activity() {
                 }
             )
         } else {
-            startService(
+            startMonitorService(
                 Intent(this, MonitorService::class.java).apply {
                     action = MonitorService.ACTION_START_PARENT
                     putExtra(MonitorService.EXTRA_CODE, getOrCreatePairingCode())
@@ -202,8 +199,12 @@ class MainActivity : Activity() {
         statusLabel.text = "Stopped"
     }
 
-    private fun startService(intent: Intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+    private fun startMonitorService(intent: Intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 
     private fun stopMonitoringServiceOnly() {
@@ -224,7 +225,7 @@ class MainActivity : Activity() {
                                 snapshot.batteryPercent,
                                 snapshot.cpuPercent,
                                 snapshot.ramPercent,
-                                snapshot.batteryMinutesRemaining
+                                snapshot.batteryMinutesRemaining ?: -1L
                             )
                         }
                     }
