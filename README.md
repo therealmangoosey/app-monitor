@@ -4,9 +4,19 @@ A lightweight Android device monitor with three modes:
 
 - **Local-only:** monitors the current Android device.
 - **Parent:** receives telemetry from a paired Android child **or a Termux device** on the same local network.
-- **Child:** sends battery, CPU, RAM and estimated time-to-empty from another Android device.
+- **Child:** sends battery, charging state, CPU, RAM and estimated time-to-empty from another Android device.
 
 Telemetry stays on the local network. There is no cloud account or third-party telemetry service.
+
+## What is reported
+
+The monitor shows:
+
+- Battery percentage.
+- **Charging / Not charging** state.
+- CPU usage percentage.
+- RAM usage percentage.
+- Estimated time until empty when the Android device exposes the required battery readings.
 
 ## Termux sender
 
@@ -14,7 +24,7 @@ A monitored device does **not** need the Android app installed. If the device ha
 
 ### 1. Set up the Termux device
 
-Install Python and, for the best battery readings, Termux:API:
+Install Python and, for the best battery and charging readings, Termux:API:
 
 ```bash
 pkg update
@@ -27,7 +37,7 @@ Install the Termux:API Android app separately, then install its Termux package:
 pkg install termux-api
 ```
 
-The script also falls back to `/sys/class/power_supply/battery/capacity` when `termux-battery-status` is unavailable.
+The script also falls back to `/sys/class/power_supply/battery/capacity` and `/sys/class/power_supply/battery/status` when `termux-battery-status` is unavailable.
 
 ### 2. Start Parent mode on the Android app
 
@@ -62,7 +72,7 @@ Press `Ctrl+C` to stop it. If the connection drops, the script automatically ret
 
 ### Termux limitations
 
-Termux currently sends battery percentage, CPU percentage and RAM usage. Time-to-empty is sent as unavailable because Android/Termux devices do not expose a consistent discharge-time API. The Android child app can provide time-to-empty on devices that expose the required battery readings.
+Termux sends battery percentage, charging state, CPU percentage and RAM usage. Time-to-empty is sent as unavailable because Android/Termux devices do not expose a consistent discharge-time API. The Android child app can provide time-to-empty on devices that expose the required battery readings.
 
 ## Notification rules
 
@@ -97,7 +107,7 @@ On Android 13+, allow App Monitor's notification permission when prompted. Andro
 3. On the parent, choose **Parent mode**. The app shows a six-digit pairing code and local IPv4 address.
 4. On an Android child, choose **Child mode**, enter the parent IP and code, then press **Start**.
 5. On a Termux child, run `termux/app-monitor-termux.py` with the parent IP and code.
-6. The sender transmits only battery percentage, CPU percentage, RAM usage and estimated time-to-empty when available.
+6. The sender transmits battery percentage, charging state, CPU percentage, RAM usage and estimated time-to-empty when available.
 7. Press **Stop** on the Android app or `Ctrl+C` in Termux to stop sending.
 
 The connection uses a local TCP socket on port `45820`. Pairing uses the six-digit code as a simple local-network authentication step.
