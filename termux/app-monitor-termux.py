@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """App Monitor sender for Termux.
 
-Sends the same STAT protocol as the Android child app, so a Termux device can
-act as the monitored device without installing App Monitor on it.
+Sends battery percentage, charging state, CPU and RAM to the App Monitor
+parent device without installing the Android app on the monitored device.
 
 Requires: Python 3 and (recommended) Termux:API for accurate battery data.
 """
@@ -20,13 +20,23 @@ def battery():
         raw = subprocess.check_output(["termux-battery-status"], text=True, timeout=5)
         data = json.loads(raw)
         percent = int(data.get("percentage", 0))
-        return max(0, min(100, percent))
+        status = str(data.get("status", "")).upper()
+        plugged = str(data.get("plugged", "")).upper()
+        charging = status in {"CHARGING", "FULL"} or plugged not in {"", "UNPLUGGED", "NONE", "UNKNOWN"}
+        return max(0, min(100, percent)), charging
     except Exception:
         try:
             with open("/sys/class/power_supply/battery/capacity") as f:
-                return max(0, min(100, int(f.read().strip())))
+                percent = max(0, min(100, int(f.read().strip())))
+            charging = False
+            try:
+                with open("/sys/class/power_supply/battery/status") as f:
+                    charging = f.read().strip().upper() in {"CHARGING", "FULL"}
+            except Exception:
+                pass
+            return percent, charging
         except Exception:
-            return 0
+            return 0, False
 
 
 def cpu_percent():
@@ -66,12 +76,12 @@ def send(host, code, interval):
                     raise RuntimeError("Parent rejected the pairing code")
                 print("Connected. Sending telemetry every", interval, "seconds.")
                 while True:
-                    b = battery()
+                    b, charging = battery()
                     c = cpu_percent()
                     r = ram_percent()
-                    line = f"STAT|{b}|{c}|{r}|-1|{int(time.time() * 1000)}\n"
+                    line = f"STAT|{b}|{1 if charging else 0}|{c}|{r}|-1|{int(time.time() * 1000)}\n"
                     sock.sendall(line.encode())
-                    print(f"Battery {b}% | CPU {c}% | RAM {r}%")
+                    print(f"Battery {b}% | {'Charging' if charging else 'Not charging'} | CPU {c}% | RAM {r}%")
                     time.sleep(interval)
         except KeyboardInterrupt:
             print("\nStopped.")
