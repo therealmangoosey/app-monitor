@@ -76,14 +76,15 @@ Each rule can define:
 - **Notification title.**
 - **Notification message.** Use `{value}` to insert the current percentage.
 - **Notification type:** Silent, Low, Default or High importance.
+- **Action:** Open App when tapped, or Dismiss Only.
 - **Enabled/disabled state.**
 
 Examples:
 
-- Battery `<= 20` → **Low battery** → `Battery is {value}%` → High.
-- Battery `<= 10` → **Critical battery** → `Plug the device in. It is at {value}%` → High.
-- CPU `>= 90` → **High CPU usage** → `CPU is at {value}%` → Default.
-- RAM `>= 90` → **High RAM usage** → `RAM usage is {value}%` → Default.
+- Battery `<= 20` → **Low battery** → `Battery is {value}%` → High → Open App.
+- Battery `<= 10` → **Critical battery** → `Plug the device in. It is at {value}%` → High → Open App.
+- CPU `>= 90` → **High CPU usage** → `CPU is at {value}%` → Default → Dismiss Only.
+- RAM `>= 90` → **High RAM usage** → `RAM usage is {value}%` → Default → Dismiss Only.
 
 A rule triggers when its condition is reached and can trigger again after the value leaves and re-enters the condition, preventing a notification every polling cycle.
 
