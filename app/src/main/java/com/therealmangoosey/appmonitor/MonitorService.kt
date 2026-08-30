@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -33,20 +32,37 @@ class MonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_START_LOCAL -> startLocal()
             ACTION_START_PARENT -> startParent(intent.getStringExtra(EXTRA_CODE).orEmpty())
-            ACTION_START_CHILD -> startChild(
-                intent.getStringExtra(EXTRA_HOST).orEmpty(),
-                intent.getStringExtra(EXTRA_CODE).orEmpty()
-            )
+            ACTION_START_CHILD -> startChild(intent.getStringExtra(EXTRA_HOST).orEmpty(), intent.getStringExtra(EXTRA_CODE).orEmpty())
             ACTION_STOP -> stopMonitoring()
         }
         return START_NOT_STICKY
     }
 
+    private fun startLocal() {
+        if (running) return
+        running = true
+        startForeground(NOTIFICATION_ID, notification("Local monitoring active"))
+        worker = executor.submit {
+            val metrics = MetricsReader(this)
+            try {
+                while (running) {
+                    val snapshot = metrics.read()
+                    val telemetry = Telemetry(snapshot.batteryPercent, snapshot.cpuPercent, snapshot.ramPercent, snapshot.batteryMinutesRemaining)
+                    broadcastTelemetry(telemetry)
+                    Thread.sleep(5_000)
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+    }
+
     private fun startParent(code: String) {
         if (running || code.length != 6) return
         running = true
-        startForeground(NOTIFICATION_ID, notification("Parent mode: waiting for child device"))
+        startForeground(NOTIFICATION_ID, notification("Parent mode: waiting for child or Termux device"))
         worker = executor.submit {
             try {
                 ServerSocket(PORT).use { server ->
@@ -68,20 +84,19 @@ class MonitorService : Service() {
             s.soTimeout = 15_000
             val reader = BufferedReader(InputStreamReader(s.getInputStream()))
             val writer = PrintWriter(s.getOutputStream(), true)
-            val hello = reader.readLine()
-            if (hello != "HELLO|$code") {
+            if (reader.readLine() != "HELLO|$code") {
                 writer.println("DENIED")
                 broadcastStatus("Pairing rejected")
                 return
             }
             writer.println("OK")
-            broadcastStatus("Child connected")
+            broadcastStatus("Device connected")
             s.soTimeout = 0
             while (running) {
                 val line = reader.readLine() ?: break
                 Telemetry.decode(line)?.let { broadcastTelemetry(it) }
             }
-            broadcastStatus("Child disconnected")
+            broadcastStatus("Device disconnected")
         }
     }
 
@@ -110,12 +125,7 @@ class MonitorService : Service() {
                     val metrics = MetricsReader(this)
                     while (running) {
                         val snapshot = metrics.read()
-                        val telemetry = Telemetry(
-                            batteryPercent = snapshot.batteryPercent,
-                            cpuPercent = snapshot.cpuPercent,
-                            ramPercent = snapshot.ramPercent,
-                            batteryMinutesRemaining = snapshot.batteryMinutesRemaining
-                        )
+                        val telemetry = Telemetry(snapshot.batteryPercent, snapshot.cpuPercent, snapshot.ramPercent, snapshot.batteryMinutesRemaining)
                         writer.println(telemetry.encode())
                         broadcastTelemetry(telemetry)
                         Thread.sleep(5_000)
@@ -125,28 +135,21 @@ class MonitorService : Service() {
                 Thread.currentThread().interrupt()
             } catch (_: Exception) {
                 if (running) broadcastStatus("Could not connect to parent")
-            } finally {
-                clientSocket = null
-            }
+            } finally { clientSocket = null }
         }
     }
 
     private fun stopMonitoring() {
         running = false
         try { clientSocket?.close() } catch (_: Exception) { }
-        worker?.cancel(true)
-        worker = null
-        lastTriggered.clear()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        worker?.cancel(true); worker = null; lastTriggered.clear()
+        stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
     }
 
     override fun onDestroy() {
         running = false
         try { clientSocket?.close() } catch (_: Exception) { }
-        worker?.cancel(true)
-        executor.shutdownNow()
-        super.onDestroy()
+        worker?.cancel(true); executor.shutdownNow(); super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -176,62 +179,34 @@ class MonitorService : Service() {
                     lastTriggered[rule.id] = value
                     showRuleNotification(rule, value)
                 }
-            } else {
-                lastTriggered.remove(rule.id)
-            }
+            } else lastTriggered.remove(rule.id)
         }
     }
 
     private fun showRuleNotification(rule: NotificationRule, value: Int) {
         val manager = getSystemService(NotificationManager::class.java)
         val channelId = "rule_${rule.id}"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(channelId, "${rule.title} notifications", rule.importance.coerceIn(1, 4))
-            )
-        }
-        val openIntent = PendingIntent.getActivity(
-            this, rule.id.hashCode(), Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) manager.createNotificationChannel(
+            NotificationChannel(channelId, "${rule.title} notifications", rule.importance.coerceIn(1, 4))
         )
+        val openIntent = PendingIntent.getActivity(this, rule.id.hashCode(), Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val body = rule.message.replace("{value}", value.toString())
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, channelId)
-        } else {
-            Notification.Builder(this)
-        }
-        manager.notify(rule.id.hashCode(), builder
-            .setContentTitle(rule.title)
-            .setContentText(body)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentIntent(openIntent)
-            .setAutoCancel(true)
-            .build())
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else Notification.Builder(this)
+        manager.notify(rule.id.hashCode(), builder.setContentTitle(rule.title).setContentText(body).setSmallIcon(android.R.drawable.ic_dialog_info).setContentIntent(openIntent).setAutoCancel(true).build())
     }
 
     private fun broadcastStatus(status: String) {
-        sendBroadcast(Intent(ACTION_STATUS).apply {
-            setPackage(packageName)
-            putExtra(EXTRA_STATUS, status)
-        })
+        sendBroadcast(Intent(ACTION_STATUS).apply { setPackage(packageName); putExtra(EXTRA_STATUS, status) })
     }
 
-    private fun notification(text: String) = Notification.Builder(this, CHANNEL_ID)
-        .setContentTitle("App Monitor")
-        .setContentText(text)
-        .setSmallIcon(android.R.drawable.ic_menu_info_details)
-        .setOngoing(true)
-        .build()
+    private fun notification(text: String) = Notification.Builder(this, CHANNEL_ID).setContentTitle("App Monitor").setContentText(text).setSmallIcon(android.R.drawable.ic_menu_info_details).setOngoing(true).build()
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW)
-            )
-        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW))
     }
 
     companion object {
+        const val ACTION_START_LOCAL = "com.therealmangoosey.appmonitor.START_LOCAL"
         const val ACTION_START_PARENT = "com.therealmangoosey.appmonitor.START_PARENT"
         const val ACTION_START_CHILD = "com.therealmangoosey.appmonitor.START_CHILD"
         const val ACTION_STOP = "com.therealmangoosey.appmonitor.STOP"
@@ -248,14 +223,9 @@ class MonitorService : Service() {
         const val PORT = 45820
         private const val CHANNEL_ID = "app_monitor_service"
         private const val NOTIFICATION_ID = 45820
-
-        private fun validIpv4(value: String): Boolean {
-            return try {
-                val parts = value.split('.')
-                parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
-            } catch (_: Exception) {
-                false
-            }
-        }
+        private fun validIpv4(value: String): Boolean = try {
+            val parts = value.split('.')
+            parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
+        } catch (_: Exception) { false }
     }
 }
