@@ -66,20 +66,23 @@ class MonitorService : Service() {
     }
     private fun evaluateRules(t: Telemetry) {
         rules.all().filter { it.enabled }.forEach { rule -> val value = when (rule.metric) { "battery" -> t.batteryPercent; "cpu" -> t.cpuPercent; "ram" -> t.ramPercent; else -> return@forEach }
-            if (rule.matches(value)) { if (lastTriggered[rule.id] != value) { lastTriggered[rule.id] = value; showRuleNotification(rule, value) } } else lastTriggered.remove(rule.id) }
+            if (rule.matches(value)) { if (lastTriggered[rule.id] != value) { lastTriggered[rule.id] = value; showRuleNotification(rule, t) } } else lastTriggered.remove(rule.id) }
     }
     private fun sendWebhooks(t: Telemetry, source: String) {
         webhooks.all().filter { it.enabled && it.sendEveryUpdate }.forEach { config -> executor.submit { WebhookSender.send(config, t, source) } }
     }
-    private fun showRuleNotification(rule: NotificationRule, value: Int) {
+    private fun showRuleNotification(rule: NotificationRule, t: Telemetry) {
+        val value = when (rule.metric) { "battery" -> t.batteryPercent; "cpu" -> t.cpuPercent; "ram" -> t.ramPercent; else -> 0 }
         val manager = getSystemService(NotificationManager::class.java); val channelId = "rule_${rule.id}"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) manager.createNotificationChannel(NotificationChannel(channelId, "${rule.title} notifications", rule.importance.coerceIn(1, 4)))
         val openIntent = PendingIntent.getActivity(this, rule.id.hashCode(), Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val body = rule.message.replace("{value}", value.toString()); val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else Notification.Builder(this)
+        val body = rule.message.replace("{value}", value.toString()).replace("{battery}", t.batteryPercent.toString()).replace("{cpu}", t.cpuPercent.toString()).replace("{ram}", t.ramPercent.toString()).replace("{charging}", if (t.charging) "Charging" else "Not charging").replace("{time}", t.batteryMinutesRemaining?.let(::formatMinutes) ?: "Unavailable")
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else Notification.Builder(this)
         builder.setContentTitle(rule.title).setContentText(body).setSmallIcon(android.R.drawable.ic_dialog_info).setAutoCancel(true)
         if (rule.action == "open_app") builder.setContentIntent(openIntent)
         manager.notify(rule.id.hashCode(), builder.build())
     }
+    private fun formatMinutes(minutes: Long): String { val hours = minutes / 60; val mins = minutes % 60; return if (hours > 0) "${hours}h ${mins}m" else "${mins}m" }
     private fun broadcastStatus(status: String) { sendBroadcast(Intent(ACTION_STATUS).apply { setPackage(packageName); putExtra(EXTRA_STATUS, status) }) }
     private fun notification(text: String) = Notification.Builder(this, CHANNEL_ID).setContentTitle("App Monitor").setContentText(text).setSmallIcon(android.R.drawable.ic_menu_info_details).setOngoing(true).build()
     private fun createNotificationChannel() { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW)) }
