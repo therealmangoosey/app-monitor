@@ -19,8 +19,9 @@ import java.util.concurrent.Future
 class MonitorService : Service() {
     private val executor = Executors.newCachedThreadPool(); private var worker: Future<*>? = null
     @Volatile private var running = false; private var clientSocket: Socket? = null
-    private lateinit var rules: NotificationRules; private val lastTriggered = mutableMapOf<Long, Int>()
-    override fun onCreate() { super.onCreate(); rules = NotificationRules(this); createNotificationChannel() }
+    private lateinit var rules: NotificationRules; private lateinit var webhooks: WebhookSettings
+    private val lastTriggered = mutableMapOf<Long, Int>()
+    override fun onCreate() { super.onCreate(); rules = NotificationRules(this); webhooks = WebhookSettings(this); createNotificationChannel() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_LOCAL -> startLocal()
@@ -31,7 +32,7 @@ class MonitorService : Service() {
     }
     private fun startLocal() {
         if (running) return; running = true; startForeground(NOTIFICATION_ID, notification("Local monitoring active"))
-        worker = executor.submit { val metrics = MetricsReader(this); try { while (running) { val s = metrics.read(); broadcastTelemetry(Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining)); Thread.sleep(5_000) } } catch (_: InterruptedException) { Thread.currentThread().interrupt() } }
+        worker = executor.submit { val metrics = MetricsReader(this); try { while (running) { val s = metrics.read(); broadcastTelemetry(Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining), "This device"); Thread.sleep(5_000) } } catch (_: InterruptedException) { Thread.currentThread().interrupt() } }
     }
     private fun startParent(code: String) {
         if (running || code.length != 6) return; running = true; startForeground(NOTIFICATION_ID, notification("Parent mode: waiting for child or Termux device"))
@@ -40,9 +41,11 @@ class MonitorService : Service() {
     private fun handleParentClient(socket: Socket, code: String) {
         socket.use { s ->
             s.soTimeout = 15_000; val reader = BufferedReader(InputStreamReader(s.getInputStream())); val writer = PrintWriter(s.getOutputStream(), true)
-            if (reader.readLine() != "HELLO|$code") { writer.println("DENIED"); broadcastStatus("Pairing rejected"); return }
-            writer.println("OK"); broadcastStatus("Device connected"); s.soTimeout = 0
-            while (running) { val line = reader.readLine() ?: break; Telemetry.decode(line)?.let { broadcastTelemetry(it) } }; broadcastStatus("Device disconnected")
+            val hello = reader.readLine() ?: ""; val parts = hello.split('|')
+            if (parts.size !in 2..3 || parts[0] != "HELLO" || parts[1] != code) { writer.println("DENIED"); broadcastStatus("Pairing rejected"); return }
+            val source = parts.getOrNull(2)?.trim()?.takeIf { it.isNotBlank() } ?: "Remote device"
+            writer.println("OK"); broadcastStatus("Device connected: $source"); s.soTimeout = 0
+            while (running) { val line = reader.readLine() ?: break; Telemetry.decode(line)?.let { broadcastTelemetry(it, source) } }; broadcastStatus("Device disconnected: $source")
         }
     }
     private fun startChild(host: String, code: String) {
@@ -50,20 +53,23 @@ class MonitorService : Service() {
         running = true; startForeground(NOTIFICATION_ID, notification("Child mode: sending status to parent"))
         worker = executor.submit { try { Socket(host, PORT).use { socket ->
             clientSocket = socket; socket.soTimeout = 15_000; val reader = BufferedReader(InputStreamReader(socket.getInputStream())); val writer = PrintWriter(socket.getOutputStream(), true)
-            writer.println("HELLO|$code"); if (reader.readLine() != "OK") { broadcastStatus("Parent rejected the pairing code"); return@submit }
+            writer.println("HELLO|$code|${Build.MANUFACTURER} ${Build.MODEL}"); if (reader.readLine() != "OK") { broadcastStatus("Parent rejected the pairing code"); return@submit }
             broadcastStatus("Connected to parent"); socket.soTimeout = 0; val metrics = MetricsReader(this)
-            while (running) { val s = metrics.read(); val t = Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining); writer.println(t.encode()); broadcastTelemetry(t); Thread.sleep(5_000) }
+            while (running) { val s = metrics.read(); val t = Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining); writer.println(t.encode()); broadcastTelemetry(t, "${Build.MANUFACTURER} ${Build.MODEL}"); Thread.sleep(5_000) }
         } } catch (_: InterruptedException) { Thread.currentThread().interrupt() } catch (_: Exception) { if (running) broadcastStatus("Could not connect to parent") } finally { clientSocket = null } }
     }
     private fun stopMonitoring() { running = false; try { clientSocket?.close() } catch (_: Exception) { }; worker?.cancel(true); worker = null; lastTriggered.clear(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
     override fun onDestroy() { running = false; try { clientSocket?.close() } catch (_: Exception) { }; worker?.cancel(true); executor.shutdownNow(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
-    private fun broadcastTelemetry(t: Telemetry) {
-        sendBroadcast(Intent(ACTION_TELEMETRY).apply { setPackage(packageName); putExtra(EXTRA_BATTERY, t.batteryPercent); putExtra(EXTRA_CHARGING, t.charging); putExtra(EXTRA_CPU, t.cpuPercent); putExtra(EXTRA_RAM, t.ramPercent); putExtra(EXTRA_MINUTES, t.batteryMinutesRemaining ?: -1L); putExtra(EXTRA_TIMESTAMP, t.timestampMillis) }); evaluateRules(t)
+    private fun broadcastTelemetry(t: Telemetry, source: String) {
+        sendBroadcast(Intent(ACTION_TELEMETRY).apply { setPackage(packageName); putExtra(EXTRA_BATTERY, t.batteryPercent); putExtra(EXTRA_CHARGING, t.charging); putExtra(EXTRA_CPU, t.cpuPercent); putExtra(EXTRA_RAM, t.ramPercent); putExtra(EXTRA_MINUTES, t.batteryMinutesRemaining ?: -1L); putExtra(EXTRA_TIMESTAMP, t.timestampMillis) }); evaluateRules(t); sendWebhooks(t, source)
     }
     private fun evaluateRules(t: Telemetry) {
         rules.all().filter { it.enabled }.forEach { rule -> val value = when (rule.metric) { "battery" -> t.batteryPercent; "cpu" -> t.cpuPercent; "ram" -> t.ramPercent; else -> return@forEach }
             if (rule.matches(value)) { if (lastTriggered[rule.id] != value) { lastTriggered[rule.id] = value; showRuleNotification(rule, value) } } else lastTriggered.remove(rule.id) }
+    }
+    private fun sendWebhooks(t: Telemetry, source: String) {
+        webhooks.all().filter { it.enabled && it.sendEveryUpdate }.forEach { config -> executor.submit { WebhookSender.send(config, t, source) } }
     }
     private fun showRuleNotification(rule: NotificationRule, value: Int) {
         val manager = getSystemService(NotificationManager::class.java); val channelId = "rule_${rule.id}"
