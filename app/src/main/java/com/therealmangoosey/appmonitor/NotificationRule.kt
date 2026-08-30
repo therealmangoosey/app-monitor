@@ -10,6 +10,7 @@ data class NotificationRule(
     val title: String,
     val message: String,
     val importance: Int,
+    val action: String,
     val enabled: Boolean
 ) {
     fun matches(value: Int): Boolean = when (operator) {
@@ -22,26 +23,15 @@ data class NotificationRule(
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
-        put("id", id)
-        put("metric", metric)
-        put("operator", operator)
-        put("threshold", threshold)
-        put("title", title)
-        put("message", message)
-        put("importance", importance)
-        put("enabled", enabled)
+        put("id", id); put("metric", metric); put("operator", operator); put("threshold", threshold)
+        put("title", title); put("message", message); put("importance", importance); put("action", action); put("enabled", enabled)
     }
 
     companion object {
         fun fromJson(value: JSONObject) = NotificationRule(
-            id = value.optLong("id"),
-            metric = value.optString("metric", "battery"),
-            operator = value.optString("operator", "<="),
-            threshold = value.optInt("threshold", 20),
-            title = value.optString("title", "Battery alert"),
-            message = value.optString("message", "Battery is {value}%"),
-            importance = value.optInt("importance", 2),
-            enabled = value.optBoolean("enabled", true)
+            value.optLong("id"), value.optString("metric", "battery"), value.optString("operator", "<="),
+            value.optInt("threshold", 20), value.optString("title", "Battery alert"), value.optString("message", "Battery is {value}%"),
+            value.optInt("importance", 2), value.optString("action", "open_app"), value.optBoolean("enabled", true)
         )
     }
 }
