@@ -21,13 +21,21 @@ pkg update
 pkg install python termux-api
 ```
 
-Start Parent mode in App Monitor, then run:
+Start **Parent mode** in App Monitor. Parent mode starts its TCP listener automatically and shows the pairing code and local IPv4 address. Then run:
 
 ```bash
 python termux/app-monitor-termux.py PARENT_IP PAIRING_CODE
 ```
 
-Telemetry is sent over the local network on TCP port `45820`. The script sends battery percentage, charging state, CPU percentage and RAM usage. It automatically retries after a dropped connection.
+Example:
+
+```bash
+python termux/app-monitor-termux.py 192.168.1.25 483921
+```
+
+Telemetry is sent over the local network on TCP port `45820`. The script sends battery percentage, charging state, CPU percentage and RAM usage. It automatically retries after a dropped connection and reports whether the parent is unreachable or rejected the pairing code.
+
+If you see `Connection refused`, make sure Parent mode is open on the receiving Android device, that its displayed IP is being used, and that both devices are on the same Wi-Fi/LAN.
 
 ## Notification rules
 
@@ -35,7 +43,7 @@ Open **Notification rules** in the app. The trigger condition and the notificati
 
 The trigger can use Battery, CPU or RAM with `<`, `<=`, `=`, `>=` or `>` and a 0–100 threshold.
 
-The notification title and message are free-form. You can optionally use these placeholders:
+The notification title and message are completely free-form. You can optionally use these placeholders:
 
 - `{battery}` = battery percentage.
 - `{cpu}` = CPU percentage.
@@ -64,7 +72,7 @@ Webhook delivery runs separately from monitoring, so a failed webhook does not s
 
 ## APK updates and signing
 
-Android updates require the same application ID **and the same signing key**, with a higher `versionCode`. The release workflow now builds a release APK, signs it with a persistent signing key, verifies the signature and names the APK from `versionName`.
+Android updates require the same application ID and the same signing key, with a higher `versionCode`. The release workflow is intended to build a release APK with a persistent signing key and names the APK from `versionName`.
 
 Configure these GitHub Actions repository secrets before using the release workflow:
 
@@ -75,7 +83,7 @@ Configure these GitHub Actions repository secrets before using the release workf
 
 Keep the keystore private. Do not commit it to the repository.
 
-The current app version is **1.1.0** with `versionCode 2`.
+The current app version is **1.1.1** with `versionCode 3`.
 
 If an older App Monitor APK was installed using a different signing key, Android cannot replace it with the new signed build. That old build must be uninstalled once; future releases signed with the same release key will update normally.
 
@@ -83,4 +91,4 @@ If an older App Monitor APK was installed using a different signing key, Android
 
 Open the project in a recent Android Studio release and sync Gradle. The project uses Android Gradle Plugin 9.3.1, Gradle 9.5, Kotlin 2.3.21 and JDK 17.
 
-GitHub Actions builds the debug APK on pushes to `main` and `feature/**`, and on pull requests targeting `main`. The release workflow builds and publishes the signed APK from `main`.
+GitHub Actions builds the debug APK on pushes to `main` and `feature/**`, and on pull requests targeting `main`. The release workflow builds and publishes the release APK from `main`.
