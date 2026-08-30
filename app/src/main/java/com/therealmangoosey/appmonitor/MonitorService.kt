@@ -9,8 +9,6 @@ import android.os.IBinder
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
@@ -19,7 +17,7 @@ import java.util.concurrent.Future
 class MonitorService : Service() {
     private val executor = Executors.newCachedThreadPool()
     private var worker: Future<*>? = null
-    private var running = false
+    @Volatile private var running = false
     private var clientSocket: Socket? = null
 
     override fun onCreate() {
@@ -40,12 +38,9 @@ class MonitorService : Service() {
     }
 
     private fun startParent(code: String) {
-        if (running) return
+        if (running || code.length != 6) return
         running = true
-        startForeground(
-            NOTIFICATION_ID,
-            notification("Parent mode: waiting for child device")
-        )
+        startForeground(NOTIFICATION_ID, notification("Parent mode: waiting for child device"))
         worker = executor.submit {
             try {
                 ServerSocket(PORT).use { server ->
@@ -78,9 +73,7 @@ class MonitorService : Service() {
             s.soTimeout = 0
             while (running) {
                 val line = reader.readLine() ?: break
-                Telemetry.decode(line)?.let { telemetry ->
-                    broadcastTelemetry(telemetry)
-                }
+                Telemetry.decode(line)?.let { broadcastTelemetry(it) }
             }
             broadcastStatus("Child disconnected")
         }
@@ -89,14 +82,11 @@ class MonitorService : Service() {
     private fun startChild(host: String, code: String) {
         if (running) return
         if (!validIpv4(host) || code.length != 6) {
-            broadcastStatus("Enter a valid parent IP and 6-digit code")
+            broadcastStatus("Enter a valid parent IPv4 address and 6-digit code")
             return
         }
         running = true
-        startForeground(
-            NOTIFICATION_ID,
-            notification("Child mode: sending status to parent")
-        )
+        startForeground(NOTIFICATION_ID, notification("Child mode: sending status to parent"))
         worker = executor.submit {
             try {
                 Socket(host, PORT).use { socket ->
@@ -114,22 +104,14 @@ class MonitorService : Service() {
                     val metrics = MetricsReader(this)
                     while (running) {
                         val snapshot = metrics.read()
-                        writer.println(
-                            Telemetry(
-                                batteryPercent = snapshot.batteryPercent,
-                                cpuPercent = snapshot.cpuPercent,
-                                ramPercent = snapshot.ramPercent,
-                                batteryMinutesRemaining = snapshot.batteryMinutesRemaining
-                            ).encode()
+                        val telemetry = Telemetry(
+                            batteryPercent = snapshot.batteryPercent,
+                            cpuPercent = snapshot.cpuPercent,
+                            ramPercent = snapshot.ramPercent,
+                            batteryMinutesRemaining = snapshot.batteryMinutesRemaining
                         )
-                        broadcastTelemetry(
-                            Telemetry(
-                                batteryPercent = snapshot.batteryPercent,
-                                cpuPercent = snapshot.cpuPercent,
-                                ramPercent = snapshot.ramPercent,
-                                batteryMinutesRemaining = snapshot.batteryMinutesRemaining
-                            )
-                        )
+                        writer.println(telemetry.encode())
+                        broadcastTelemetry(telemetry)
                         Thread.sleep(5_000)
                     }
                 }
@@ -163,25 +145,21 @@ class MonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun broadcastTelemetry(telemetry: Telemetry) {
-        sendBroadcast(
-            Intent(ACTION_TELEMETRY).apply {
-                setPackage(packageName)
-                putExtra(EXTRA_BATTERY, telemetry.batteryPercent)
-                putExtra(EXTRA_CPU, telemetry.cpuPercent)
-                putExtra(EXTRA_RAM, telemetry.ramPercent)
-                putExtra(EXTRA_MINUTES, telemetry.batteryMinutesRemaining ?: -1L)
-                putExtra(EXTRA_TIMESTAMP, telemetry.timestampMillis)
-            }
-        )
+        sendBroadcast(Intent(ACTION_TELEMETRY).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_BATTERY, telemetry.batteryPercent)
+            putExtra(EXTRA_CPU, telemetry.cpuPercent)
+            putExtra(EXTRA_RAM, telemetry.ramPercent)
+            putExtra(EXTRA_MINUTES, telemetry.batteryMinutesRemaining ?: -1L)
+            putExtra(EXTRA_TIMESTAMP, telemetry.timestampMillis)
+        })
     }
 
     private fun broadcastStatus(status: String) {
-        sendBroadcast(
-            Intent(ACTION_STATUS).apply {
-                setPackage(packageName)
-                putExtra(EXTRA_STATUS, status)
-            }
-        )
+        sendBroadcast(Intent(ACTION_STATUS).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_STATUS, status)
+        })
     }
 
     private fun notification(text: String) = android.app.Notification.Builder(this, CHANNEL_ID)
@@ -193,13 +171,8 @@ class MonitorService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "App Monitor service",
-                    NotificationManager.IMPORTANCE_LOW
-                )
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW)
             )
         }
     }
@@ -224,10 +197,8 @@ class MonitorService : Service() {
 
         private fun validIpv4(value: String): Boolean {
             return try {
-                val address = NetworkInterface.getNetworkInterfaces().toList()
-                    .flatMap { it.inetAddresses.toList() }
-                    .firstOrNull { it.hostAddress == value }
-                address is Inet4Address
+                val parts = value.split('.')
+                parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
             } catch (_: Exception) {
                 false
             }
