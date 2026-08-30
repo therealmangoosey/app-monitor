@@ -27,7 +27,13 @@ class WebhooksActivity : Activity() {
         items.forEach { config ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 16, 0, 16) }
             row.addView(TextView(this).apply { text = "${config.name}\nPreset: ${platformName(config.platform)}\n${if (config.enabled) "Enabled" else "Disabled"} • ${if (config.sendEveryUpdate) "Every update" else "Manual/test only"}"; textSize = 16f })
-            val buttons = LinearLayout(this); buttons.addView(Button(this).apply { text = "Test"; setOnClickListener { val test = Telemetry(73, false, 18, 42, 215); Thread { WebhookSender.send(config, test, "Test device") }.start() } }); buttons.addView(Button(this).apply { text = "Edit"; setOnClickListener { showEditor(config) } }); buttons.addView(Button(this).apply { text = if (config.enabled) "Disable" else "Enable"; setOnClickListener { store.update(config.copy(enabled = !config.enabled)); refresh() } }); buttons.addView(Button(this).apply { text = "Delete"; setOnClickListener { store.remove(config.id); refresh() } })
+            val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            listButtons@ buttons.apply {
+                addView(Button(this@WebhooksActivity).apply { text = "Test"; setOnClickListener { val test = Telemetry(73, false, 18, 42, 215); Thread { WebhookSender.send(config, test, "Test device") }.start() } })
+                addView(Button(this@WebhooksActivity).apply { text = "Edit"; setOnClickListener { showEditor(config) } })
+                addView(Button(this@WebhooksActivity).apply { text = if (config.enabled) "Disable" else "Enable"; setOnClickListener { store.update(config.copy(enabled = !config.enabled)); refresh() } })
+                addView(Button(this@WebhooksActivity).apply { text = "Delete"; setOnClickListener { store.remove(config.id); refresh() } })
+            }
             row.addView(buttons); list.addView(row, ViewGroup.LayoutParams(-1, -2))
         }
         if (items.isEmpty()) list.addView(TextView(this).apply { text = "No webhooks yet."; textSize = 16f; setPadding(0, 24, 0, 0) })
