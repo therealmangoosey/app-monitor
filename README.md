@@ -1,121 +1,86 @@
 # App Monitor
 
-A lightweight Android device monitor with three modes:
-
-- **Local-only:** monitors the current Android device.
-- **Parent:** receives telemetry from a paired Android child **or a Termux device** on the same local network.
-- **Child:** sends battery, charging state, CPU, RAM and estimated time-to-empty from another Android device.
-
-Telemetry stays on the local network. There is no cloud account or third-party telemetry service.
+A lightweight Android device monitor with local-only, parent and child modes.
 
 ## What is reported
 
-The monitor shows:
-
 - Battery percentage.
-- **Charging / Not charging** state.
+- Charging / Not charging state.
 - CPU usage percentage.
 - RAM usage percentage.
-- Estimated time until empty when the Android device exposes the required battery readings.
+- Estimated time until empty when Android exposes the required readings.
 
 ## Termux sender
 
-A monitored device does **not** need the Android app installed. If the device has Termux, run the included `termux/app-monitor-termux.py` script and it can act as the child/sender.
+A monitored device does not need the Android app installed. A Termux device can run `termux/app-monitor-termux.py` and act as the child/sender.
 
-### 1. Set up the Termux device
-
-Install Python and, for the best battery and charging readings, Termux:API:
+Install Python and Termux:API:
 
 ```bash
 pkg update
-pkg install python
+pkg install python termux-api
 ```
 
-Install the Termux:API Android app separately, then install its Termux package:
-
-```bash
-pkg install termux-api
-```
-
-The script also falls back to `/sys/class/power_supply/battery/capacity` and `/sys/class/power_supply/battery/status` when `termux-battery-status` is unavailable.
-
-### 2. Start Parent mode on the Android app
-
-1. Open App Monitor on the device that will receive the information.
-2. Select **Parent mode**.
-3. Copy the displayed **local IPv4 address** and **6-digit pairing code**.
-4. Keep the parent device and Termux device on the same Wi-Fi/LAN.
-
-The parent listens on TCP port `45820`.
-
-### 3. Start the Termux sender
-
-From the repository directory:
+Start Parent mode in App Monitor, then run:
 
 ```bash
 python termux/app-monitor-termux.py PARENT_IP PAIRING_CODE
 ```
 
-Example:
-
-```bash
-python termux/app-monitor-termux.py 192.168.1.25 483921
-```
-
-By default, telemetry is sent every 5 seconds. Change it with:
-
-```bash
-python termux/app-monitor-termux.py 192.168.1.25 483921 --interval 10
-```
-
-Press `Ctrl+C` to stop it. If the connection drops, the script automatically retries every 5 seconds.
-
-### Termux limitations
-
-Termux sends battery percentage, charging state, CPU percentage and RAM usage. Time-to-empty is sent as unavailable because Android/Termux devices do not expose a consistent discharge-time API. The Android child app can provide time-to-empty on devices that expose the required battery readings.
+Telemetry is sent over the local network on TCP port `45820`. The script sends battery percentage, charging state, CPU percentage and RAM usage. It automatically retries after a dropped connection.
 
 ## Notification rules
 
-Open **Notification rules** in the Android app to create alerts for the local device or a connected child/Termux device.
+Open **Notification rules** in the app. The trigger condition and the notification text are separate, so a rule can trigger on one value while saying anything you want.
 
-Each rule can define:
+The trigger can use Battery, CPU or RAM with `<`, `<=`, `=`, `>=` or `>` and a 0–100 threshold.
 
-- **Metric:** Battery, CPU or RAM.
-- **Condition:** `<`, `<=`, `=`, `>=` or `>`.
-- **Threshold:** percentage from 0–100.
-- **Notification title.**
-- **Notification message.** Use `{value}` to insert the current percentage.
-- **Notification type:** Silent, Low, Default or High importance.
-- **Action:** Open App when tapped, or Dismiss Only.
-- **Enabled/disabled state.**
+The notification title and message are free-form. You can optionally use these placeholders:
 
-Examples:
+- `{battery}` = battery percentage.
+- `{cpu}` = CPU percentage.
+- `{ram}` = RAM percentage.
+- `{charging}` = `Charging` or `Not charging`.
+- `{time}` = estimated time remaining, when available.
+- `{value}` = the value that caused the rule to trigger.
 
-- Battery `<= 20` → **Low battery** → `Battery is {value}%` → High → Open App.
-- Battery `<= 10` → **Critical battery** → `Plug the device in. It is at {value}%` → High → Open App.
-- CPU `>= 90` → **High CPU usage** → `CPU is at {value}%` → Default → Dismiss Only.
-- RAM `>= 90` → **High RAM usage** → `RAM usage is {value}%` → Default → Dismiss Only.
+For example, a CPU rule at `>= 90%` can say `The device is working hard. Battery: {battery}% and power: {charging}.`.
 
-A rule triggers when its condition is reached and can trigger again after the value leaves and re-enters the condition, preventing a notification every polling cycle.
+## Webhooks
 
-On Android 13+, allow App Monitor's notification permission when prompted. Android notification-channel settings can also control sound/vibration after a channel has been created.
+Open **Webhooks** in the app to add as many webhook destinations as you need. The editor is inside a scrollable layout so it works on small and large displays.
 
-## How pairing works
+Presets:
 
-1. Install the app on the parent and, if using Android as the sender, the child device.
-2. Put the devices on the same Wi-Fi/LAN.
-3. On the parent, choose **Parent mode**. The app shows a six-digit pairing code and local IPv4 address.
-4. On an Android child, choose **Child mode**, enter the parent IP and code, then press **Start**.
-5. On a Termux child, run `termux/app-monitor-termux.py` with the parent IP and code.
-6. The sender transmits battery percentage, charging state, CPU percentage, RAM usage and estimated time-to-empty when available.
-7. Press **Stop** on the Android app or `Ctrl+C` in Termux to stop sending.
+- **Discord:** creates a polished embed with fields, timestamp, source device and App Monitor version.
+- **Slack:** creates a formatted Block Kit message.
+- **Generic JSON:** sends a simple JSON telemetry payload for compatible webhook services.
 
-The connection uses a local TCP socket on port `45820`. Pairing uses the six-digit code as a simple local-network authentication step.
+You can choose which telemetry fields are included: battery, charging state, CPU, RAM and time remaining. Webhooks can be tested, enabled/disabled, edited and deleted.
+
+For parent mode, webhook data comes from the connected child or Termux sender, so the webhook reports the device that actually produced the telemetry. The sender's device name is included as the source where available.
+
+Webhook delivery runs separately from monitoring, so a failed webhook does not stop telemetry collection.
+
+## APK updates and signing
+
+Android updates require the same application ID **and the same signing key**, with a higher `versionCode`. The release workflow now builds a release APK, signs it with a persistent signing key, verifies the signature and names the APK from `versionName`.
+
+Configure these GitHub Actions repository secrets before using the release workflow:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Keep the keystore private. Do not commit it to the repository.
+
+The current app version is **1.1.0** with `versionCode 2`.
+
+If an older App Monitor APK was installed using a different signing key, Android cannot replace it with the new signed build. That old build must be uninstalled once; future releases signed with the same release key will update normally.
 
 ## Build
 
 Open the project in a recent Android Studio release and sync Gradle. The project uses Android Gradle Plugin 9.3.1, Gradle 9.5, Kotlin 2.3.21 and JDK 17.
 
-The Android app module uses AGP 9's built-in Kotlin support, so `org.jetbrains.kotlin.android` is intentionally not applied.
-
-GitHub Actions builds the project on pushes to `main` and `feature/**`, and on pull requests targeting `main`.
+GitHub Actions builds the debug APK on pushes to `main` and `feature/**`, and on pull requests targeting `main`. The release workflow builds and publishes the signed APK from `main`.
