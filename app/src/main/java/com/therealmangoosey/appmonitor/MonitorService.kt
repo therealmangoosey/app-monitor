@@ -31,7 +31,7 @@ class MonitorService : Service() {
     }
     private fun startLocal() {
         if (running) return; running = true; startForeground(NOTIFICATION_ID, notification("Local monitoring active"))
-        worker = executor.submit { val metrics = MetricsReader(this); try { while (running) { val s = metrics.read(); broadcastTelemetry(Telemetry(s.batteryPercent, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining)); Thread.sleep(5_000) } } catch (_: InterruptedException) { Thread.currentThread().interrupt() } }
+        worker = executor.submit { val metrics = MetricsReader(this); try { while (running) { val s = metrics.read(); broadcastTelemetry(Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining)); Thread.sleep(5_000) } } catch (_: InterruptedException) { Thread.currentThread().interrupt() } }
     }
     private fun startParent(code: String) {
         if (running || code.length != 6) return; running = true; startForeground(NOTIFICATION_ID, notification("Parent mode: waiting for child or Termux device"))
@@ -52,14 +52,14 @@ class MonitorService : Service() {
             clientSocket = socket; socket.soTimeout = 15_000; val reader = BufferedReader(InputStreamReader(socket.getInputStream())); val writer = PrintWriter(socket.getOutputStream(), true)
             writer.println("HELLO|$code"); if (reader.readLine() != "OK") { broadcastStatus("Parent rejected the pairing code"); return@submit }
             broadcastStatus("Connected to parent"); socket.soTimeout = 0; val metrics = MetricsReader(this)
-            while (running) { val s = metrics.read(); val t = Telemetry(s.batteryPercent, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining); writer.println(t.encode()); broadcastTelemetry(t); Thread.sleep(5_000) }
+            while (running) { val s = metrics.read(); val t = Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining); writer.println(t.encode()); broadcastTelemetry(t); Thread.sleep(5_000) }
         } } catch (_: InterruptedException) { Thread.currentThread().interrupt() } catch (_: Exception) { if (running) broadcastStatus("Could not connect to parent") } finally { clientSocket = null } }
     }
     private fun stopMonitoring() { running = false; try { clientSocket?.close() } catch (_: Exception) { }; worker?.cancel(true); worker = null; lastTriggered.clear(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
     override fun onDestroy() { running = false; try { clientSocket?.close() } catch (_: Exception) { }; worker?.cancel(true); executor.shutdownNow(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
     private fun broadcastTelemetry(t: Telemetry) {
-        sendBroadcast(Intent(ACTION_TELEMETRY).apply { setPackage(packageName); putExtra(EXTRA_BATTERY, t.batteryPercent); putExtra(EXTRA_CPU, t.cpuPercent); putExtra(EXTRA_RAM, t.ramPercent); putExtra(EXTRA_MINUTES, t.batteryMinutesRemaining ?: -1L); putExtra(EXTRA_TIMESTAMP, t.timestampMillis) }); evaluateRules(t)
+        sendBroadcast(Intent(ACTION_TELEMETRY).apply { setPackage(packageName); putExtra(EXTRA_BATTERY, t.batteryPercent); putExtra(EXTRA_CHARGING, t.charging); putExtra(EXTRA_CPU, t.cpuPercent); putExtra(EXTRA_RAM, t.ramPercent); putExtra(EXTRA_MINUTES, t.batteryMinutesRemaining ?: -1L); putExtra(EXTRA_TIMESTAMP, t.timestampMillis) }); evaluateRules(t)
     }
     private fun evaluateRules(t: Telemetry) {
         rules.all().filter { it.enabled }.forEach { rule -> val value = when (rule.metric) { "battery" -> t.batteryPercent; "cpu" -> t.cpuPercent; "ram" -> t.ramPercent; else -> return@forEach }
@@ -78,7 +78,7 @@ class MonitorService : Service() {
     private fun notification(text: String) = Notification.Builder(this, CHANNEL_ID).setContentTitle("App Monitor").setContentText(text).setSmallIcon(android.R.drawable.ic_menu_info_details).setOngoing(true).build()
     private fun createNotificationChannel() { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW)) }
     companion object {
-        const val ACTION_START_LOCAL = "com.therealmangoosey.appmonitor.START_LOCAL"; const val ACTION_START_PARENT = "com.therealmangoosey.appmonitor.START_PARENT"; const val ACTION_START_CHILD = "com.therealmangoosey.appmonitor.START_CHILD"; const val ACTION_STOP = "com.therealmangoosey.appmonitor.STOP"; const val ACTION_TELEMETRY = "com.therealmangoosey.appmonitor.TELEMETRY"; const val ACTION_STATUS = "com.therealmangoosey.appmonitor.STATUS"; const val EXTRA_CODE = "code"; const val EXTRA_HOST = "host"; const val EXTRA_BATTERY = "battery"; const val EXTRA_CPU = "cpu"; const val EXTRA_RAM = "ram"; const val EXTRA_MINUTES = "minutes"; const val EXTRA_TIMESTAMP = "timestamp"; const val EXTRA_STATUS = "status"; const val PORT = 45820; private const val CHANNEL_ID = "app_monitor_service"; private const val NOTIFICATION_ID = 45820
+        const val ACTION_START_LOCAL = "com.therealmangoosey.appmonitor.START_LOCAL"; const val ACTION_START_PARENT = "com.therealmangoosey.appmonitor.START_PARENT"; const val ACTION_START_CHILD = "com.therealmangoosey.appmonitor.START_CHILD"; const val ACTION_STOP = "com.therealmangoosey.appmonitor.STOP"; const val ACTION_TELEMETRY = "com.therealmangoosey.appmonitor.TELEMETRY"; const val ACTION_STATUS = "com.therealmangoosey.appmonitor.STATUS"; const val EXTRA_CODE = "code"; const val EXTRA_HOST = "host"; const val EXTRA_BATTERY = "battery"; const val EXTRA_CHARGING = "charging"; const val EXTRA_CPU = "cpu"; const val EXTRA_RAM = "ram"; const val EXTRA_MINUTES = "minutes"; const val EXTRA_TIMESTAMP = "timestamp"; const val EXTRA_STATUS = "status"; const val PORT = 45820; private const val CHANNEL_ID = "app_monitor_service"; private const val NOTIFICATION_ID = 45820
         private fun validIpv4(value: String): Boolean = try { val parts = value.split('.'); parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true } } catch (_: Exception) { false }
     }
 }
