@@ -12,7 +12,7 @@
         android:label="App Monitor"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
+        <activity android:name=".NotificationRulesActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -21,7 +21,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
         <service
             android:name=".MonitorService"
             android:exported="false"
