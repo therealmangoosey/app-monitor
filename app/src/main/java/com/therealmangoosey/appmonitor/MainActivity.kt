@@ -10,8 +10,6 @@ import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -31,10 +29,6 @@ class MainActivity : Activity() {
     private lateinit var pairingLabel: TextView
     private lateinit var ipInput: EditText
     private lateinit var codeInput: EditText
-    private val handler = Handler(Looper.getMainLooper())
-    private var localOnly = true
-    private var localPolling = false
-    private val localReader by lazy { MetricsReader(this) }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -42,6 +36,7 @@ class MainActivity : Activity() {
                 MonitorService.ACTION_STATUS -> statusLabel.text = intent.getStringExtra(MonitorService.EXTRA_STATUS).orEmpty()
                 MonitorService.ACTION_TELEMETRY -> showStats(
                     intent.getIntExtra(MonitorService.EXTRA_BATTERY, 0),
+                    intent.getBooleanExtra(MonitorService.EXTRA_CHARGING, false),
                     intent.getIntExtra(MonitorService.EXTRA_CPU, 0),
                     intent.getIntExtra(MonitorService.EXTRA_RAM, 0),
                     intent.getLongExtra(MonitorService.EXTRA_MINUTES, -1L)
@@ -55,9 +50,7 @@ class MainActivity : Activity() {
         buildUi(); registerReceiverCompat(); requestNotificationPermission(); showLocalMode()
     }
 
-    override fun onDestroy() {
-        stopLocalPolling(); unregisterReceiver(receiver); super.onDestroy()
-    }
+    override fun onDestroy() { unregisterReceiver(receiver); super.onDestroy() }
 
     private fun buildUi() {
         val scroll = ScrollView(this)
@@ -80,45 +73,53 @@ class MainActivity : Activity() {
     }
 
     private fun showLocalMode() {
-        localOnly = true; stopMonitoringServiceOnly(); stopLocalPolling()
+        stopMonitoringServiceOnly()
         pairingLabel.text = "Local-only\nNothing is sent to a parent or uploaded."
         ipInput.visibility = View.GONE; codeInput.visibility = View.GONE
-        modeLabel.text = "Showing this device's battery, CPU and RAM"
-        statusLabel.text = "Local monitoring active"
+        modeLabel.text = "Showing this device's battery, charging state, CPU and RAM"
+        statusLabel.text = "Local monitoring active"; statsLabel.text = ""
         startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_LOCAL })
     }
 
     private fun showParentMode() {
-        localOnly = false; stopLocalPolling(); stopMonitoringServiceOnly()
+        stopMonitoringServiceOnly()
         val code = getOrCreatePairingCode()
         pairingLabel.text = "Parent mode\nGive the child or Termux device this code:\n$code\n\nYour local IP: ${getLocalIpv4() ?: "Unavailable"}"
         ipInput.visibility = View.GONE; codeInput.visibility = View.GONE
-        modeLabel.text = "Receives battery, CPU, RAM and time-to-empty from a paired Android child or Termux sender."
+        modeLabel.text = "Receives battery, charging state, CPU, RAM and time-to-empty from a paired device."
         statusLabel.text = "Ready to listen"; statsLabel.text = "No device connected"
     }
 
     private fun showChildMode() {
-        localOnly = false; stopLocalPolling(); stopMonitoringServiceOnly()
+        stopMonitoringServiceOnly()
         pairingLabel.text = "Child mode\nEnter the parent device's local IP and pairing code."
         ipInput.visibility = View.VISIBLE; codeInput.visibility = View.VISIBLE
-        modeLabel.text = "Sends only battery, CPU, RAM and estimated time-to-empty."
+        modeLabel.text = "Sends battery, charging state, CPU, RAM and estimated time-to-empty."
         statusLabel.text = "Not connected"; statsLabel.text = ""
     }
 
     private fun startSelectedMode() {
-        if (localOnly) { startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_LOCAL }); return }
         if (ipInput.visibility == View.VISIBLE) {
             val host = ipInput.text.toString().trim(); val code = codeInput.text.toString().trim()
             if (host.isBlank() || code.length != 6) { statusLabel.text = "Enter the parent IP and 6-digit code"; return }
             startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_CHILD; putExtra(MonitorService.EXTRA_HOST, host); putExtra(MonitorService.EXTRA_CODE, code) })
-        } else startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_PARENT; putExtra(MonitorService.EXTRA_CODE, getOrCreatePairingCode()) })
+        } else if (pairingLabel.text.toString().startsWith("Parent mode")) {
+            startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_PARENT; putExtra(MonitorService.EXTRA_CODE, getOrCreatePairingCode()) })
+        } else {
+            startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_LOCAL })
+        }
     }
 
-    private fun stopMonitoring() { stopLocalPolling(); stopMonitoringServiceOnly(); statusLabel.text = "Stopped" }
+    private fun stopMonitoring() { stopMonitoringServiceOnly(); statusLabel.text = "Stopped" }
     private fun startMonitorService(intent: Intent) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent) }
     private fun stopMonitoringServiceOnly() { stopService(Intent(this, MonitorService::class.java)) }
-    private fun stopLocalPolling() { localPolling = false; handler.removeCallbacksAndMessages(null) }
-    private fun showStats(battery: Int, cpu: Int, ram: Int, minutes: Long) { statsLabel.text = "Battery  $battery%\nCPU  $cpu%\nRAM  $ram%\nTime until empty  ${if (minutes >= 0) formatMinutes(minutes) else "Unavailable"}" }
+
+    private fun showStats(battery: Int, charging: Boolean, cpu: Int, ram: Int, minutes: Long) {
+        val power = if (charging) "Charging" else "Not charging"
+        val time = if (minutes >= 0) formatMinutes(minutes) else "Unavailable"
+        statsLabel.text = "Battery  $battery%\nPower  $power\nCPU  $cpu%\nRAM  $ram%\nTime until empty  $time"
+    }
+
     private fun formatMinutes(minutes: Long): String { val hours = minutes / 60; val mins = minutes % 60; return if (hours > 0) "${hours}h ${mins}m" else "${mins}m" }
     private fun getOrCreatePairingCode(): String {
         val prefs = getSharedPreferences("pairing", MODE_PRIVATE); val existing = prefs.getString("code", null)
