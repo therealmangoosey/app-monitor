@@ -11,11 +11,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
@@ -40,33 +35,21 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
-      - name: Build release APK
-        run: gradle :app:assembleRelease
+      - name: Build installable debug APK
+        run: gradle :app:assembleDebug
 
-      - name: Prepare release APK
-        id: apk
+      - name: Verify APK
         shell: bash
         run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose "$APK"
+
+      - name: Prepare APK
+        run: |
           mkdir -p release
-          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
-          if [[ -n "$KEYSTORE_B64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
-            echo "$KEYSTORE_B64" | base64 --decode > release-keystore.jks
-            ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -1)
-            APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-            "$ZIPALIGN" -p 4 "$UNSIGNED" release/aligned.apk
-            "$APKSIGNER" sign \
-              --ks release-keystore.jks \
-              --ks-pass env:KEYSTORE_PASSWORD \
-              --ks-key-alias "$KEY_ALIAS" \
-              --key-pass env:KEY_PASSWORD \
-              --out "release/app-monitor-v${{ steps.version.outputs.version }}.apk" \
-              release/aligned.apk
-            "$APKSIGNER" verify "release/app-monitor-v${{ steps.version.outputs.version }}.apk"
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          else
-            cp "$UNSIGNED" "release/app-monitor-v${{ steps.version.outputs.version }}-unsigned.apk"
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-          fi
+          cp app/build/outputs/apk/debug/app-debug.apk "release/app-monitor-v${{ steps.version.outputs.version }}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -75,17 +58,12 @@ jobs:
           name: App Monitor v${{ steps.version.outputs.version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: release/app-monitor-v${{ steps.version.outputs.version }}*.apk
+          files: release/app-monitor-v${{ steps.version.outputs.version }}.apk
           body: |
             App Monitor v${{ steps.version.outputs.version }}
 
             Version code: ${{ steps.version.outputs.version_code }}
-            Signed APK: ${{ steps.apk.outputs.signed }}
 
-            This release was produced by the main branch build workflow.
-            When Android signing secrets are configured, the APK is signed for normal in-place updates. Otherwise the release contains an unsigned build for testing and must be signed/installed through a development workflow.
+            This APK is a GitHub Actions debug build and is signed with the Android debug certificate so it can be installed normally.
 
-      - name: Remove signing material
-        if: always()
-        shell: bash
-        run: rm -f release-keystore.jks release/aligned.apk
+            To install a newer release, uninstall the previous App Monitor APK first, then install this APK.
