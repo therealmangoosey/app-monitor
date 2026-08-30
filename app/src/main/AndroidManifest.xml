@@ -13,6 +13,7 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity android:name=".NotificationRulesActivity" android:exported="false" />
+        <activity android:name=".WebhooksActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
