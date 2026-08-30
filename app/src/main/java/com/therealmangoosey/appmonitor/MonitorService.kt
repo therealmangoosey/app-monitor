@@ -52,10 +52,7 @@ class MonitorService : Service() {
             try {
                 while (running) {
                     val s = metrics.read()
-                    broadcastTelemetry(
-                        Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining),
-                        deviceName()
-                    )
+                    broadcastTelemetry(Telemetry(s.batteryPercent, s.charging, s.cpuPercent, s.ramPercent, s.batteryMinutesRemaining), deviceName())
                     Thread.sleep(5_000)
                 }
             } catch (_: InterruptedException) {
@@ -136,10 +133,7 @@ class MonitorService : Service() {
                     writer.println("HELLO|$code|${deviceName()}")
                     val response = reader.readLine() ?: ""
                     if (response != "OK") {
-                        broadcastStatus(
-                            if (response.contains("INVALID_CODE")) "Parent rejected the pairing code"
-                            else "Parent rejected the connection"
-                        )
+                        broadcastStatus(if (response.contains("INVALID_CODE")) "Parent rejected the pairing code" else "Parent rejected the connection")
                         return@submit
                     }
                     broadcastStatus("Connected to parent")
@@ -209,7 +203,7 @@ class MonitorService : Service() {
             if (rule.matches(value)) {
                 if (lastTriggered[rule.id] != value) {
                     lastTriggered[rule.id] = value
-                    showRuleNotification(rule, t)
+                    showRuleNotification(rule, t, value)
                 }
             } else {
                 lastTriggered.remove(rule.id)
@@ -223,43 +217,27 @@ class MonitorService : Service() {
         }
     }
 
-    private fun showRuleNotification(rule: NotificationRule, telemetry: Telemetry) {
+    private fun showRuleNotification(rule: NotificationRule, telemetry: Telemetry, triggeredValue: Int) {
         val manager = getSystemService(NotificationManager::class.java)
         val channelId = "rule_${rule.id}"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(channelId, "${rule.title} notifications", rule.importance.coerceIn(1, 4))
-            )
+            manager.createNotificationChannel(NotificationChannel(channelId, "${rule.title} notifications", rule.importance.coerceIn(1, 4)))
         }
-        val openIntent = PendingIntent.getActivity(
-            this,
-            rule.id.hashCode(),
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val body = expandMessage(rule.message, telemetry)
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, channelId)
-        } else {
-            Notification.Builder(this)
-        }
-        builder.setContentTitle(rule.title)
-            .setContentText(body)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setAutoCancel(true)
+        val openIntent = PendingIntent.getActivity(this, rule.id.hashCode(), Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val body = expandMessage(rule.message, telemetry, triggeredValue)
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, channelId) else Notification.Builder(this)
+        builder.setContentTitle(rule.title).setContentText(body).setSmallIcon(android.R.drawable.ic_dialog_info).setAutoCancel(true)
         if (rule.action == "open_app") builder.setContentIntent(openIntent)
         manager.notify(rule.id.hashCode(), builder.build())
     }
 
-    private fun expandMessage(message: String, t: Telemetry): String = message
-        .replace("{value}", t.metricValueFallback().toString())
+    private fun expandMessage(message: String, t: Telemetry, triggeredValue: Int): String = message
+        .replace("{value}", triggeredValue.toString())
         .replace("{battery}", t.batteryPercent.toString())
         .replace("{cpu}", t.cpuPercent.toString())
         .replace("{ram}", t.ramPercent.toString())
         .replace("{charging}", if (t.charging) "Charging" else "Not charging")
         .replace("{time}", t.batteryMinutesRemaining?.let(::formatMinutes) ?: "Unavailable")
-
-    private fun Telemetry.metricValueFallback(): Int = batteryPercent
 
     private fun formatMinutes(minutes: Long): String {
         val hours = minutes / 60
@@ -283,9 +261,7 @@ class MonitorService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW)
-            )
+            getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "App Monitor service", NotificationManager.IMPORTANCE_LOW))
         }
     }
 
@@ -311,11 +287,5 @@ class MonitorService : Service() {
         const val PORT = 45820
         private const val CHANNEL_ID = "app_monitor_service"
         private const val NOTIFICATION_ID = 45820
-        private fun validIpv4(value: String): Boolean = try {
-            val parts = value.split('.')
-            parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
-        } catch (_: Exception) {
-            false
-        }
     }
 }
