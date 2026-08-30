@@ -1,8 +1,11 @@
 package com.therealmangoosey.appmonitor
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -19,9 +22,12 @@ class MonitorService : Service() {
     private var worker: Future<*>? = null
     @Volatile private var running = false
     private var clientSocket: Socket? = null
+    private lateinit var rules: NotificationRules
+    private val lastTriggered = mutableMapOf<Long, Int>()
 
     override fun onCreate() {
         super.onCreate()
+        rules = NotificationRules(this)
         createNotificationChannel()
     }
 
@@ -130,6 +136,7 @@ class MonitorService : Service() {
         try { clientSocket?.close() } catch (_: Exception) { }
         worker?.cancel(true)
         worker = null
+        lastTriggered.clear()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -153,6 +160,53 @@ class MonitorService : Service() {
             putExtra(EXTRA_MINUTES, telemetry.batteryMinutesRemaining ?: -1L)
             putExtra(EXTRA_TIMESTAMP, telemetry.timestampMillis)
         })
+        evaluateRules(telemetry)
+    }
+
+    private fun evaluateRules(telemetry: Telemetry) {
+        rules.all().filter { it.enabled }.forEach { rule ->
+            val value = when (rule.metric) {
+                "battery" -> telemetry.batteryPercent
+                "cpu" -> telemetry.cpuPercent
+                "ram" -> telemetry.ramPercent
+                else -> return@forEach
+            }
+            if (rule.matches(value)) {
+                if (lastTriggered[rule.id] != value) {
+                    lastTriggered[rule.id] = value
+                    showRuleNotification(rule, value)
+                }
+            } else {
+                lastTriggered.remove(rule.id)
+            }
+        }
+    }
+
+    private fun showRuleNotification(rule: NotificationRule, value: Int) {
+        val manager = getSystemService(NotificationManager::class.java)
+        val channelId = "rule_${rule.id}"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(channelId, "${rule.title} notifications", rule.importance.coerceIn(1, 4))
+            )
+        }
+        val openIntent = PendingIntent.getActivity(
+            this, rule.id.hashCode(), Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val body = rule.message.replace("{value}", value.toString())
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, channelId)
+        } else {
+            Notification.Builder(this)
+        }
+        manager.notify(rule.id.hashCode(), builder
+            .setContentTitle(rule.title)
+            .setContentText(body)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(openIntent)
+            .setAutoCancel(true)
+            .build())
     }
 
     private fun broadcastStatus(status: String) {
@@ -162,7 +216,7 @@ class MonitorService : Service() {
         })
     }
 
-    private fun notification(text: String) = android.app.Notification.Builder(this, CHANNEL_ID)
+    private fun notification(text: String) = Notification.Builder(this, CHANNEL_ID)
         .setContentTitle("App Monitor")
         .setContentText(text)
         .setSmallIcon(android.R.drawable.ic_menu_info_details)
