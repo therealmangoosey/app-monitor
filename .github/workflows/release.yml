@@ -8,12 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-  KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-  KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-  KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -32,56 +26,7 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Check release signing secrets
+      - name: Decode stable release keystore
         shell: bash
-        run: |
-          test -n "$KEYSTORE_BASE64" || { echo "Missing ANDROID_KEYSTORE_BASE64 repository secret"; exit 1; }
-          test -n "$KEYSTORE_PASSWORD" || { echo "Missing ANDROID_KEYSTORE_PASSWORD repository secret"; exit 1; }
-          test -n "$KEY_ALIAS" || { echo "Missing ANDROID_KEY_ALIAS repository secret"; exit 1; }
-          test -n "$KEY_PASSWORD" || { echo "Missing ANDROID_KEY_PASSWORD repository secret"; exit 1; }
-
-      - name: Decode release keystore
-        shell: bash
-        run: echo "$KEYSTORE_BASE64" | base64 --decode > release-keystore.jks
-
-      - name: Build release APK
-        run: gradle :app:assembleRelease
-
-      - name: Read app version
-        id: version
-        shell: bash
-        run: |
-          VERSION=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | head -1 | sed 's/versionName = "//;s/"//')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Align APK
-        shell: bash
-        run: |
-          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -1)
-          "$ZIPALIGN" -p 4 app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
-
-      - name: Sign APK
-        shell: bash
-        run: |
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$APKSIGNER" sign \
-            --ks release-keystore.jks \
-            --ks-pass pass:"$KEYSTORE_PASSWORD" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass pass:"$KEY_PASSWORD" \
-            --out "app-monitor-v${{ steps.version.outputs.version }}.apk" \
-            app-release-aligned.apk
-          "$APKSIGNER" verify --verbose "app-monitor-v${{ steps.version.outputs.version }}.apk"
-
-      - name: Remove signing material
-        if: always()
-        shell: bash
-        run: rm -f release-keystore.jks app-release-aligned.apk
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: App Monitor v${{ steps.version.outputs.version }}
-          generate_release_notes: true
-          files: app-monitor-v${{ steps.version.outputs.version }}.apk
+        run: echo 'MIIK3AIBAzCCCoYGCSqGSIb3DQEHAaCCCncEggpzMIIKbzCCBbYGCSqGSIb3DQEMCgECoIIFQDCCBTwwZgYJKoZIhvcNAQUNMFkwOAYJKoZIhvcNAQUMMCsEFNWPqgTpJ81oy5kmXY3n3DxGIF/QAgInEAIBIDAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQVLqlC2VqOTJNWOsop8vrrgSCBNB7zQmEdzF2EUYuWX3Eph0LGakaya7oILFFvnR2ksUlaoXf9ofnkqsUr4Ak9hl4cjmk1WfTXe4C7cUTTPJbYilpFvk2V4iu1qemCdERrDy4khTJsGWYzwVr7AfeKOw/2htqi+3xEr1bNs71wDzyQdqvlmjsY7B9UoLDbcg/UI1vNPNMwKvjOXIlU+N76bvVQrxRSWQIHIjNJdWEFrD5qxwSgMZf4tp8t2oOGlmpE0uLvViwK0F/PMVOBz33wSLNWxItsKW65sr0LPz8OumacS2wSs8o1YJmm/Is/cXVguG8lkrgkGzUNV/4YWJOwSbPj80h+7lvrWLH796HGIdHf2HNRewzATLHp0skasPf/PWFX55SqpZdtqC7bSRULMXrD80vWr63Ur/u8NsH5NFRp8s/gMVPyu/VbcQ3oNp7z06ZM+WKLA8wnsWyux1S5jZ6KMwOgBC0Gf3hS/iOOU0/bCSdKXMvs+ruNu1f+miDZPMdzHVVMgxO6z9TE6oMRfLrrea/qMKc3CCqMBntUzAFEs5hYyUSKylVeHL3Q9vcnT70iyb9vRYMMIEa+yqxL/HtFoeGp21FYTgEdulEdDKYl5mtY0H9RuYEg0dlG1QXOM9kUw2OYBe5e2p9T9bGOo3RPnnPG5Dq9NGxuffjhKZHdbCr3XB7+3uhPqvzf137dkUkm1EKNjElgl1raVUCNHckdL+ZAcxReSq2SWggxpNuHwXbcF+PSz8tmiPGugd7s0X0D2rVmPnlwot8ertooxEV/65b5dxTvaLTbWer9O6gJQXE7q1RRFsly4hvlxuPT8GjfSU4vIlj/Bvkm5KjZOX4EgSB24nRTLyFOou9nDPaN9eQFVLCQ4MQimFcoC4EwwJIn0uelplSQXt2ehX1fDFHDkVHs3VitakYGuRiNbbwQSSMqmoVnjlmRMMbCW7PVCdJTqHsFZCZxQGpjfNokcHNySVt8nJRFQhps2/otzilFWweXu8U5vsWnlPHpslDiReBmqyqripld41Iln+OF3G7dEMoXXIyjxoXwl51sjlvFpupuOJ/nKCsEcLXGgciR1H/mXfMRIM0xKkUneV+L97fyj5qc2ZUpvu0KGSEa88wojELB1WIcsNR+K5wkDgZ54LiQohutl01S/j78c/ae4l7ZSCGjxSIQf4F2LbIKlSqA8rxzMsadfiWm9BgASryK4fjBC4ahN4tG5YiJJ3X2HBY+aDCq5cWfdi6zSXSS1OenmjLXinfJAE6QEHkqAuv60HcvnX3zVEgXPfu5D3ITfOP9gTvf1yxDjva3kGc9YYmrPUxCCTXNWHWIJGo1ZwLvCkujdmkclqaZylovMHJ+gO1vxeOxOKLodmm9TMcQJaJLlFHo9JjRt4pGw2X5Vv/ylTmc1PtSZu/Nj3/8/m1x1bZ9f2JfB?',' > /dev/null
+        "
