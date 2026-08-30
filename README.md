@@ -27,36 +27,21 @@ Start **Parent mode** in App Monitor. Parent mode starts its TCP listener automa
 python termux/app-monitor-termux.py PARENT_IP PAIRING_CODE
 ```
 
-Example:
-
-```bash
-python termux/app-monitor-termux.py 192.168.1.25 483921
-```
-
-Telemetry is sent over the local network on TCP port `45820`. The script sends battery percentage, charging state, CPU percentage and RAM usage. It automatically retries after a dropped connection and reports whether the parent is unreachable or rejected the pairing code.
+Telemetry is sent over the local network on TCP port `45820`. The script sends battery percentage, charging state, CPU percentage and RAM usage. It automatically retries after a dropped connection.
 
 If you see `Connection refused`, make sure Parent mode is open on the receiving Android device, that its displayed IP is being used, and that both devices are on the same Wi-Fi/LAN.
 
 ## Notification rules
 
-Open **Notification rules** in the app. The trigger condition and the notification text are separate, so a rule can trigger on one value while saying anything you want.
+Open **Notification rules** in the app. The trigger condition and notification text are separate, so a rule can trigger on one value while saying anything you want.
 
 The trigger can use Battery, CPU or RAM with `<`, `<=`, `=`, `>=` or `>` and a 0–100 threshold.
 
-The notification title and message are completely free-form. You can optionally use these placeholders:
-
-- `{battery}` = battery percentage.
-- `{cpu}` = CPU percentage.
-- `{ram}` = RAM percentage.
-- `{charging}` = `Charging` or `Not charging`.
-- `{time}` = estimated time remaining, when available.
-- `{value}` = the value that caused the rule to trigger.
-
-For example, a CPU rule at `>= 90%` can say `The device is working hard. Battery: {battery}% and power: {charging}.`.
+The notification title and message are completely free-form. You can optionally use `{battery}`, `{cpu}`, `{ram}`, `{charging}`, `{time}` and `{value}`. `{value}` is the metric that actually triggered the rule.
 
 ## Webhooks
 
-Open **Webhooks** in the app to add as many webhook destinations as you need. The editor is inside a scrollable layout so it works on small and large displays.
+Open **Webhooks** in the app to add webhook destinations. The editor is inside a scrollable layout so it works on small and large displays.
 
 Presets:
 
@@ -64,31 +49,16 @@ Presets:
 - **Slack:** creates a formatted Block Kit message.
 - **Generic JSON:** sends a simple JSON telemetry payload for compatible webhook services.
 
-You can choose which telemetry fields are included: battery, charging state, CPU, RAM and time remaining. Webhooks can be tested, enabled/disabled, edited and deleted.
-
-For parent mode, webhook data comes from the connected child or Termux sender, so the webhook reports the device that actually produced the telemetry. The sender's device name is included as the source where available.
-
-Webhook delivery runs separately from monitoring, so a failed webhook does not stop telemetry collection.
+For parent mode, webhook data comes from the connected child or Termux sender, so the webhook reports the device that actually produced the telemetry.
 
 ## APK updates and signing
 
-Android updates require the same application ID and the same signing key, with a higher `versionCode`. The release workflow is intended to build a release APK with a persistent signing key and names the APK from `versionName`.
+Android updates require the same application ID and signing key, with a higher `versionCode`. The release workflow now builds a release APK, signs it with the repository's stable release key, verifies it, and names the APK from `versionName`.
 
-Configure these GitHub Actions repository secrets before using the release workflow:
+The current app version is **1.1.2** with `versionCode 3`.
 
-- `ANDROID_KEYSTORE_BASE64`
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
-
-Keep the keystore private. Do not commit it to the repository.
-
-The current app version is **1.1.1** with `versionCode 3`.
-
-If an older App Monitor APK was installed using a different signing key, Android cannot replace it with the new signed build. That old build must be uninstalled once; future releases signed with the same release key will update normally.
+If an older App Monitor APK was installed using a different signing key, Android cannot replace it with the stable-signed build. That old build must be uninstalled once. Future releases using the stable key will update normally.
 
 ## Build
 
 Open the project in a recent Android Studio release and sync Gradle. The project uses Android Gradle Plugin 9.3.1, Gradle 9.5, Kotlin 2.3.21 and JDK 17.
-
-GitHub Actions builds the debug APK on pushes to `main` and `feature/**`, and on pull requests targeting `main`. The release workflow builds and publishes the release APK from `main`.
