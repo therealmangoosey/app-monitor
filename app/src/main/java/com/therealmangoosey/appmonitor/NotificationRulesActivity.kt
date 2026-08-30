@@ -16,7 +16,7 @@ class NotificationRulesActivity : Activity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 40, 32, 32) }
         root.addView(TextView(this).apply { text = "Notification rules"; textSize = 28f; setTypeface(null, Typeface.BOLD) })
         root.addView(TextView(this).apply {
-            text = "Choose what triggers the alert, then write whatever you want in the title and message. Optional placeholders: {battery}, {cpu}, {ram}, {charging}, {time}."
+            text = "Choose what triggers the alert, then write whatever you want in the title and message. Optional placeholders: {value}, {battery}, {cpu}, {ram}, {charging}, {time}."
             textSize = 15f; setPadding(0, 8, 0, 20)
         })
         root.addView(Button(this).apply { text = "Add rule"; setOnClickListener { showRuleDialog(null) } })
@@ -41,17 +41,18 @@ class NotificationRulesActivity : Activity() {
         val operator = Spinner(this).apply { adapter = ArrayAdapter(this@NotificationRulesActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("<=", ">=", "<", ">", "=")) }
         val threshold = EditText(this).apply { hint = "Trigger percentage"; inputType = InputType.TYPE_CLASS_NUMBER }
         val title = EditText(this).apply { hint = "Notification title (anything you want)" }
-        val message = EditText(this).apply { hint = "Notification message (anything you want)" }
+        val message = EditText(this).apply { hint = "Notification message (anything you want)"; minLines = 3; gravity = android.view.Gravity.TOP }
         val importance = Spinner(this).apply { adapter = ArrayAdapter(this@NotificationRulesActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("Silent", "Low", "Default", "High")) }
         val action = Spinner(this).apply { adapter = ArrayAdapter(this@NotificationRulesActivity, android.R.layout.simple_spinner_dropdown_item, arrayOf("Open App", "Dismiss Only")) }
         box.addView(TextView(this).apply { text = "Trigger condition"; textSize = 13f }); box.addView(metric); box.addView(operator); box.addView(threshold)
         box.addView(TextView(this).apply { text = "Notification text"; textSize = 13f; setPadding(0, 10, 0, 0) }); box.addView(title); box.addView(message)
+        box.addView(TextView(this).apply { text = "Optional placeholders: {value}, {battery}, {cpu}, {ram}, {charging}, {time}"; textSize = 12f; setPadding(0, 4, 0, 8) })
         box.addView(importance); box.addView(action)
         existing?.let { r -> metric.setSelection(arrayOf("battery", "cpu", "ram").indexOf(r.metric).coerceAtLeast(0)); operator.setSelection(arrayOf("<=", ">=", "<", ">", "=").indexOf(r.operator).coerceAtLeast(0)); threshold.setText(r.threshold.toString()); title.setText(r.title); message.setText(r.message); importance.setSelection((r.importance - 1).coerceIn(0, 3)); action.setSelection(if (r.action == "dismiss") 1 else 0) }
-            ?: run { threshold.setText("20"); title.setText("Low battery"); message.setText("Your device is at {battery}% and is {charging}."); importance.setSelection(2) }
+            ?: run { threshold.setText("20"); title.setText("Low battery"); message.setText("Your device needs attention. Battery: {battery}% | CPU: {cpu}% | {charging}"); importance.setSelection(2) }
         AlertDialog.Builder(this).setTitle(if (existing == null) "New notification rule" else "Edit notification rule").setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("Save") { _, _ ->
-                val rule = NotificationRule(existing?.id ?: System.currentTimeMillis(), metric.selectedItem.toString(), operator.selectedItem.toString(), threshold.text.toString().toIntOrNull()?.coerceIn(0, 100) ?: 20, title.text.toString().ifBlank { "App Monitor alert" }, message.text.toString().ifBlank { "Condition reached" }, importance.selectedItemPosition + 1, if (action.selectedItemPosition == 1) "dismiss" else "open_app", existing?.enabled ?: true)
+                val rule = NotificationRule(existing?.id ?: System.currentTimeMillis(), metric.selectedItem.toString(), operator.selectedItem.toString(), threshold.text.toString().toIntOrNull()?.coerceIn(0, 100) ?: 20, title.text.toString().ifBlank { "App Monitor alert" }, message.text.toString(), importance.selectedItemPosition + 1, if (action.selectedItemPosition == 1) "dismiss" else "open_app", existing?.enabled ?: true)
                 if (existing == null) store.add(rule) else store.update(rule); refresh()
             }.setNegativeButton("Cancel", null).show()
     }
