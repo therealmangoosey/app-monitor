@@ -22,7 +22,6 @@ import java.net.NetworkInterface
 import java.security.SecureRandom
 
 class MainActivity : Activity() {
-    private lateinit var content: LinearLayout
     private lateinit var modeLabel: TextView
     private lateinit var statusLabel: TextView
     private lateinit var statsLabel: TextView
@@ -54,7 +53,7 @@ class MainActivity : Activity() {
 
     private fun buildUi() {
         val scroll = ScrollView(this)
-        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 48, 40, 40) }
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 48, 40, 40) }
         scroll.addView(content); setContentView(scroll)
         content.addView(TextView(this).apply { text = "App Monitor"; textSize = 30f; setTypeface(null, Typeface.BOLD) })
         modeLabel = TextView(this).apply { textSize = 16f; setPadding(0, 8, 0, 24) }; content.addView(modeLabel)
@@ -105,9 +104,7 @@ class MainActivity : Activity() {
             startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_CHILD; putExtra(MonitorService.EXTRA_HOST, host); putExtra(MonitorService.EXTRA_CODE, code) })
         } else if (pairingLabel.text.toString().startsWith("Parent mode")) {
             startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_PARENT; putExtra(MonitorService.EXTRA_CODE, getOrCreatePairingCode()) })
-        } else {
-            startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_LOCAL })
-        }
+        } else startMonitorService(Intent(this, MonitorService::class.java).apply { action = MonitorService.ACTION_START_LOCAL })
     }
 
     private fun stopMonitoring() { stopMonitoringServiceOnly(); statusLabel.text = "Stopped" }
