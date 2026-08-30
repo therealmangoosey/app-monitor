@@ -24,4 +24,6 @@ The app uses the Android battery charge counter and current reading when the dev
 
 Open the project in a recent Android Studio release and sync Gradle. The project uses Android Gradle Plugin 9.3.1, Gradle 9.5, Kotlin 2.3.21, and JDK 17.
 
+The Android app module uses AGP 9's built-in Kotlin support, so `org.jetbrains.kotlin.android` is intentionally not applied.
+
 GitHub Actions builds the project on pushes to `main` and `feature/**`, and on pull requests targeting `main`.
