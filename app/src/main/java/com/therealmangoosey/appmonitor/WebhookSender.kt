@@ -1,6 +1,7 @@
 package com.therealmangoosey.appmonitor
 
 import android.os.Build
+import com.therealmangoosey.appmonitor.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
