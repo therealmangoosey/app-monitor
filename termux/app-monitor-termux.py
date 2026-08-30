@@ -3,8 +3,6 @@
 
 Sends battery percentage, charging state, CPU and RAM to the App Monitor
 parent device without installing the Android app on the monitored device.
-
-Requires: Python 3 and (recommended) Termux:API for accurate battery data.
 """
 import argparse
 import json
@@ -66,11 +64,12 @@ def ram_percent():
 
 
 def send(host, code, interval):
+    source = socket.gethostname() or "Termux device"
     while True:
         try:
             with socket.create_connection((host, PORT), timeout=15) as sock:
                 sock.settimeout(15)
-                sock.sendall(f"HELLO|{code}\n".encode())
+                sock.sendall(f"HELLO|{code}|{source}\n".encode())
                 response = sock.recv(64).decode(errors="replace").strip()
                 if response != "OK":
                     raise RuntimeError("Parent rejected the pairing code")
@@ -94,7 +93,7 @@ def send(host, code, interval):
 def main():
     parser = argparse.ArgumentParser(description="Send Termux device stats to App Monitor")
     parser.add_argument("parent_ip", help="IPv4 address shown by App Monitor parent mode")
-    parser.add_argument("pairing_code", help="6-digit pairing code shown by App Monitor")
+    parser.add_argument("pairing_code", help="6-digit pairing code shown by App Monitor parent mode")
     parser.add_argument("--interval", type=float, default=5, help="seconds between telemetry packets")
     args = parser.parse_args()
     if len(args.pairing_code) != 6 or not args.pairing_code.isdigit():
